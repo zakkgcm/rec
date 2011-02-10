@@ -66,7 +66,7 @@ class CamCorder ():
         self.command.extend(['-f', 'x11grab', '-r', '60', '-s', self.dimensions, '-i', ':0.0+' + self.position])
         
         self.command.extend(['-vcodec', self.vcodec])
-        if self.vcodec == 'libx264':
+        if self.vpre:
             self.command.extend(['-vpre', self.vpre])
 
         self.command.extend(['-acodec', self.acodec])
@@ -165,9 +165,9 @@ class CameraMan ():
         dimgroup.add_argument('-y', metavar='y', default='0', type=str, help="specify recording y position")
 
         codecgroup = optparser.add_argument_group()
-        codecgroup.add_argument('--vcodec', default='libx264', metavar='codec', help="force video codec (default: %(default)s)")
-        codecgroup.add_argument('--vpre',   default='lossless_ultrafast', metavar='preset', help="specify encoder preset (libx264 only! default: %(default)s)")
-        codecgroup.add_argument('--acodec', default='mp2',     metavar='codec', help="force audio codec (default: %(default)s)")
+        codecgroup.add_argument('--vcodec', default='libx264', metavar='codec',  help="force video codec (default: %(default)s)")
+        codecgroup.add_argument('--vpre',   default=None,      metavar='preset', help="specify encoder preset (lossless_ultrafast default with libx264)")
+        codecgroup.add_argument('--acodec', default='mp2', metavar='codec', help="force audio codec (default: %(default)s)")
         
         audiogroup = optparser.add_argument_group()
         audiogroup.add_argument('--jack',  action='append', dest='jack_inputs',  default=[], metavar='inputs', help="specify inputs from JACK (automatically connected)")
@@ -185,7 +185,10 @@ class CameraMan ():
 
         # in the future these may be a dict of options
         camera.vcodec = args.vcodec
-        camera.vpre   = args.vpre
+        camera.vpre = args.vpre
+        if args.vcodec == 'libx264'  and not args.vpre:
+            camera.vpre = 'lossless_ultrafast'
+        
         camera.acodec = args.acodec
 
         camera.dimensions = args.width + 'x' + args.height
