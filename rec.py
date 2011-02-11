@@ -33,7 +33,8 @@ __license__ = \
 import os, sys, fcntl, time, select
 import re, argparse
 import subprocess as sub
-from Xlib import display
+from Xlib import X, Xcursorfont, display
+from Xlib import error as Xerror
 
 class CamCorder ():
     '''main recording system'''
@@ -147,6 +148,246 @@ class CamCorder ():
             sys.exit(1)
 
 class CameraMan ():
+    def __init__ (self):
+        self.d = display.Display()
+        self.screen = self.d.screen()
+    
+    # TODO: compress this entire hunk of code down
+    # TODO: more thorough error handling
+
+    def select_area (self):
+        '''select a rectangular region or window'''
+        '''based on Tom Gilbert's scrot code'''
+        
+        rect = Rectangle()
+        outrect = Rectangle()
+        gc = self.screen.root.create_gc(
+                foreground = self.screen.white_pixel,
+                background = self.screen.black_pixel,
+                function = X.GXxor,
+                plane_mask = self.screen.white_pixel ^ self.screen.black_pixel,
+                subwindow_mode = X.IncludeInferiors
+            )
+
+        cursor_font = self.d.open_font('cursor')
+        cursor = cursor_font.create_glyph_cursor(cursor_font, Xcursorfont.crosshair, Xcursorfont.crosshair + 1,
+                        (0, 0, 0), (0xffff, 0xffff, 0xffff)
+                 )
+        
+        # grab pointer and keyboard
+        try:
+            self.screen.root.grab_pointer(
+                owner_events = False,
+                event_mask = X.ButtonMotionMask | X.ButtonPressMask | X.ButtonReleaseMask,
+                pointer_mode = X.GrabModeAsync,
+                keyboard_mode = X.GrabModeAsync,
+                confine_to = self.screen.root,
+                cursor = cursor,
+                time = X.CurrentTime
+             )
+        except Exception as e:
+            print "Couldn't grab pointer: {0}".format(e)
+            sys.exit(1)
+
+        try: 
+            ret = self.screen.root.grab_keyboard(
+                owner_events = False,
+                pointer_mode = X.GrabModeAsync,
+                keyboard_mode = X.GrabModeAsync,
+                time = X.CurrentTime
+            )
+        except Exception as e:
+            print "Couldn't grab keyboard: {0}".format(e)
+            sys.exit(1)
+        
+        done = False
+        grabbed = True
+        button_pressed = False
+        # grab events
+        while True: 
+            while not done and self.d.pending_events():
+                ev = self.d.next_event()
+                if ev.type == X.MotionNotify and button_pressed:
+                    if (rect.width):
+                        self.screen.root.rectangle(gc, rect.x, rect.y, rect.width, rect.height)
+                    else:
+                        self.d.change_active_pointer_grab(
+                            event_mask = X.ButtonMotionMask | X.ButtonReleaseMask,
+                            cursor = cursor,
+                            time = X.CurrentTime
+                        )
+                        
+                    rect.x = outrect.x
+                    rect.y = outrect.y
+                    rect.width  = ev.event_x - rect.x
+                    rect.height = ev.event_y - rect.y
+
+                    if rect.width < 0:
+                        rect.x += rect.width
+                        rect.width = 0 - rect.width
+                    if rect.height < 0:
+                        rect.y += rect.height
+                        rect.height = 0 - rect.height
+                    
+                    self.screen.root.rectangle(gc, rect.x, rect.y, rect.width, rect.height)
+                    self.d.flush()
+                
+                elif ev.type == X.ButtonPress:
+                    button_pressed = True
+                    outrect.x = ev.event_x
+                    outrect.y = ev.event_y
+
+                    # attempt to get a window
+                    target = self.get_window(ev.child, ev.event_x, ev.event_y)
+                    if target == None:
+                        target = self.screen.root
+
+                elif ev.type == X.ButtonRelease:
+                    done = True
+                elif ev.type == X.KeyPress:
+                    print "Key was pressed, exiting..."
+                    done = True
+                    grabbed = False
+                elif ev.type == X.KeyRelease:
+                    pass
+                else:
+                    pass
+            
+            if done: break;
+        # end grab events
+
+        if rect.width:
+            self.screen.root.rectangle(gc, rect.x, rect.y, rect.width, rect.height)
+            self.d.flush()
+
+        self.d.ungrab_pointer(X.CurrentTime)
+        self.d.ungrab_keyboard(X.CurrentTime)
+        gc.free()
+        cursor.free()
+        self.d.sync()
+        
+        if grabbed:
+            if rect.width > 5:
+                # rectangle was drawn
+                outrect.width  = ev.event_x - outrect.x
+                outrect.height = ev.event_y - outrect.y
+                
+                if outrect.width < 0:
+                    outrect.x += outrect.width
+                    outrect.width = 0 - outrect.width
+                if outrect.height < 0:
+                    outrect.y += outrect.height
+                    outrect.height = 0 - outrect.height
+            
+            else:
+                # window was clicked
+                if target != self.screen.root:
+                    status = target.get_geometry()
+
+                    # find wm frame
+                    while True:
+                        s = target.query_tree()
+                        if s.parent == None or s.parent == s.root:
+                            break
+                        target = s.parent
+                    
+                    # get client win
+                    target = self.get_client_window(target)
+                    target.raise_window()
+                
+                attr = target.get_attributes()
+                if not attr or attr.map_state != X.IsViewable:
+                    return None
+
+                targetgeo = target.get_geometry()
+                outrect.width  = targetgeo.width
+                outrect.height = targetgeo.height
+                
+                r = self.screen.root.translate_coords(target, 0, 0)
+                outrect.x = r.x
+                outrect.y = r.y
+            
+            # clip rectangle
+            if outrect.x < 0:
+                outrect.width += outrect.x
+                outrect.x = 0
+            if outrect.y < 0:
+                outrect.height += outrect.y
+                outrect.y = 0
+            if (outrect.x + outrect.width) > self.screen.width_in_pixels:
+                outrect.w = self.screen.width_in_pixels - outrect.x
+            if (outrect.y + outrect.height) > self.screen.height_in_pixels:
+                outrect.height = self.screen.height_in_pixels - outrect.y
+            
+            # some encoders (aka libx264) cannot into odd sizes
+            if (outrect.width % 2) != 0:
+                if (outrect.width + 1) > self.screen.width_in_pixels:
+                    outrect.width -= 1
+                else:
+                    outrect.width +=1
+            if (outrect.height % 2) != 0:
+                if (outrect.height + 1) > self.screen.height_in_pixels:
+                    outrect.height -= 1
+                else:
+                    outrect.height +=1
+
+            return outrect
+        return None
+            
+    def get_window (self, window, x, y):
+        source = self.screen.root
+        target = window
+        if window == X.NONE:
+            window = self.screen.root
+                 
+        while True:
+            s = source.translate_coords(window, x, y)
+            target = s.child
+
+            if s == X.NONE:
+                break
+            if target == X.NONE:
+                break;
+            
+            source = window
+            window = s.child
+            x = s.x
+            y = s.y
+        
+        if target == X.NONE:
+            target = window
+        return target
+    
+    def get_client_window (self, target):
+        prop = self.d.intern_atom("WM_STATE", True)
+        if prop == X.NONE:
+            return target
+        status = target.get_property(prop, X.AnyPropertyType, 0, 0)
+        if status != None and status.property_type != X.NONE:
+            return target
+        client = self.get_window_from_property(target, prop)
+        if client == None:
+            return target
+        return client
+    
+    def get_window_from_property (self, window, prop):
+        child = None
+        s = window.query_tree()
+        if s == None:
+            return None
+        for c in s.children:
+            if child != None:
+                break
+
+            data = c.get_property(prop, X.AnyPropertyType, 0, 0)
+            if data != None and data.property_type != X.NONE:
+                child = c
+        for c in s.children:
+            if child != None:
+                break
+            child = self.get_window_from_property(c, prop)
+        return child
+
     def main (self):
         '''parse args and begin'''
         
@@ -156,11 +397,11 @@ class CameraMan ():
         optparser.add_argument('--version', action='version', version='%(prog)s ' + __version__)
         
         # to be implemented
-        #optparser.add_argument('-s', '--select', action='store_true', help="select a window or region to record")
+        optparser.add_argument('-s', '--select', action='store_true', help="select a window or region to record")
         
-        dimgroup = optparser.add_argument_group()
-        dimgroup.add_argument('--width',  metavar='width',  default=str(display.Display().screen().width_in_pixels),  type=str, help="specify recording width")
-        dimgroup.add_argument('--height', metavar='height', default=str(display.Display().screen().height_in_pixels), type=str, help="specify recording height")
+        dimgroup = optparser.add_argument_group(description="These arguments are overriden by -s/--select.")
+        dimgroup.add_argument('--width',  metavar='width',  default=str(self.screen.width_in_pixels),  type=str, help="specify recording width")
+        dimgroup.add_argument('--height', metavar='height', default=str(self.screen.height_in_pixels), type=str, help="specify recording height")
         dimgroup.add_argument('-x', metavar='x', default='0', type=str, help="specify recording x position")
         dimgroup.add_argument('-y', metavar='y', default='0', type=str, help="specify recording y position")
 
@@ -174,7 +415,7 @@ class CameraMan ():
         audiogroup.add_argument('--alsa' , action='append', dest='alsa_inputs',  default=[], metavar='inputs', help="specify inputs from ALSA")
         audiogroup.add_argument('--pulse', action='append', dest='pulse_inputs', default=[], metavar='inputs', help="specify inputs from PulseAudio")
 
-        optparser.add_argument('--threads', default='0', help="number of threads to use (0 is a sane default) (default: %(default)s)")
+        optparser.add_argument('--threads', default='0', help="number of threads to use (default: guess)")
         optparser.add_argument('--no-threads', action='store_false', dest='use_threads', help="disable threads")
         optparser.add_argument('outfile', metavar='file')
         
@@ -190,14 +431,31 @@ class CameraMan ():
             camera.vpre = 'lossless_ultrafast'
         
         camera.acodec = args.acodec
-
-        camera.dimensions = args.width + 'x' + args.height
-        camera.position = args.x + ',' + args.y
         
+        rect = Rectangle(args.x, args.y, args.width, args.height)  
+        if args.select:
+            rect = self.select_area()
+            if not rect:
+                print "Error grabbing area!"
+                sys.exit(1)
+        
+        camera.dimensions = str(rect.width) + 'x' + str(rect.height)
+        camera.position = str(rect.x) + ',' + str(rect.y)
+
         if args.use_threads:
             camera.threads = args.threads
-
+        
         camera.record(args.outfile)
+
+class Rectangle:
+    '''simple rectangle with width, height, x, and y'''
+
+    def __init__ (self, x=0, y=0, width=0, height=0):
+        self.x, self.y = x, y
+        self.width, self.height = width, height
+
+    def __repr__(self):
+        return "x: {0} y: {1} w: {2} h: {3}".format(self.x, self.y, self.width, self.height)
 
 if __name__ == "__main__":
     try:

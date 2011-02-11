@@ -32,6 +32,5 @@ _"what hte fux is dis: Xlib.protocol.request.QueryExtension???/ y did u make it 
 python-xlib bug, supposedly fixed already
 
 #### Future Plans
-window and screen region selection
 more support for options
 simple GUI that hides in a systray icon
