@@ -9,7 +9,7 @@
 
 """rec - Simple, quality screen recording using ffmpeg in python"""
 
-__version__ = '0.1'
+__version__ = '0.3'
 __author__ = 'Cheeseum'
 __license__ = \
 ''' 
@@ -64,17 +64,24 @@ class CamCorder ():
         if len(self.inputs['jack']) > 0:
             self.command.extend(['-f', 'jack', '-i', 'ffmpeg'])
        
-        self.command.extend(['-f', 'x11grab', '-r', '60', '-s', self.dimensions, '-i', ':0.0+' + self.position])
+        self.command.extend(['-f', 'x11grab'])
+        
+        if self.rate < 0:
+            self.rate = 60
+
+        self.command.extend(['-r', self.rate])
+        self.command.extend(['-s', self.dimensions, '-i', ':0.0+' + self.position])
         
         self.command.extend(['-vcodec', self.vcodec])
         if self.vpre:
             self.command.extend(['-vpre', self.vpre])
-
+        if  self.gop > 0:
+            self.command.extend(['-g', self.gop])
         self.command.extend(['-acodec', self.acodec])
         
         if self.threads:
             self.command.extend(['-threads', self.threads])
-
+        
         self.command.append(outfile)
         
         try:
@@ -399,11 +406,15 @@ class CameraMan ():
         # to be implemented
         optparser.add_argument('-s', '--select', action='store_true', help="select a window or region to record")
         
+        framegroup = optparser.add_argument_group()
+        framegroup.add_argument('-r', '--rate', metavar='framerate', default='60', type=str, help="framerate of capture (default: %(default)s)")
+        framegroup.add_argument('-g', '--gop', metavar='gop', default='0', type=str, help="set GOP size (number of smoothing frames, default %(default)s)")
+        
         dimgroup = optparser.add_argument_group(description="These arguments are overriden by -s/--select.")
-        dimgroup.add_argument('--width',  metavar='width',  default=str(self.screen.width_in_pixels),  type=str, help="specify recording width")
-        dimgroup.add_argument('--height', metavar='height', default=str(self.screen.height_in_pixels), type=str, help="specify recording height")
-        dimgroup.add_argument('-x', metavar='x', default='0', type=str, help="specify recording x position")
-        dimgroup.add_argument('-y', metavar='y', default='0', type=str, help="specify recording y position")
+        dimgroup.add_argument('--width',  metavar='width',  default=str(self.screen.width_in_pixels),  type=str, help="specify recording width (default: screen width)")
+        dimgroup.add_argument('--height', metavar='height', default=str(self.screen.height_in_pixels), type=str, help="specify recording height (default: screen height)")
+        dimgroup.add_argument('-x', metavar='x', default='0', type=str, help="specify recording x position (default: 0)")
+        dimgroup.add_argument('-y', metavar='y', default='0', type=str, help="specify recording y position (default: 0)")
 
         codecgroup = optparser.add_argument_group()
         codecgroup.add_argument('--vcodec', default='libx264', metavar='codec',  help="force video codec (default: %(default)s)")
@@ -431,7 +442,9 @@ class CameraMan ():
             camera.vpre = 'lossless_ultrafast'
         
         camera.acodec = args.acodec
-        
+        camera.rate = args.rate
+        camera.gop = args.gop
+
         rect = Rectangle(args.x, args.y, args.width, args.height)  
         if args.select:
             rect = self.select_area()
@@ -441,7 +454,7 @@ class CameraMan ():
         
         camera.dimensions = str(rect.width) + 'x' + str(rect.height)
         camera.position = str(rect.x) + ',' + str(rect.y)
-
+        
         if args.use_threads:
             camera.threads = args.threads
         
