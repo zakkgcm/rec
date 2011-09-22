@@ -56,7 +56,7 @@ class CamCorder ():
             print "[jack] Connected {0} to {1}.".format(src_port, dest_port)
             
     def jack_capture (self, filepath):
-        ''' calls jack_capture, returns a process handle and filepath'''
+        ''' calls jack_capture, returns a process handle'''
 
         # TODO: implement configurable format
         command = ['jack_capture', '-f', 'flac', '-dm', filepath]
@@ -526,7 +526,13 @@ class CameraMan ():
         
         if args.use_threads:
             camera.threads = args.threads
-        
+       
+        # overwrite confirmation
+        if os.path.isfile(args.outfile):
+            ans = raw_input("{0} exists! Overwrite? [y/n]: ".format(args.outfile))
+            if ans != 'y' or ans != 'Y':
+                sys.exit(0)
+
         camera.record(args.outfile)
 
 class Rectangle:
