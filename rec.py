@@ -203,7 +203,7 @@ class CamCorder ():
                     print "Fail!"
                     print "Something went wrong when muxing in the audio!"
                     print "Your jack_connect audio is here: {0}".format(audio_tmp)
-                    print "Your recorded video is here: {1}".format(video_tmp)
+                    print "Your recorded video is here: {0}".format(video_tmp)
                 else:
                     print "Done!"
                     print ""
