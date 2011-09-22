@@ -9,7 +9,7 @@
 
 """rec - Simple, quality screen recording using ffmpeg in python"""
 
-__version__ = '0.3'
+__version__ = '0.4'
 __author__ = 'Cheeseum'
 __license__ = \
 ''' 
@@ -31,6 +31,7 @@ __license__ = \
 '''
 
 import os, sys, fcntl, time, select
+import tempfile
 import re, argparse
 import subprocess as sub
 from Xlib import X, Xcursorfont, display
@@ -53,17 +54,39 @@ class CamCorder ():
             print "[jack] Connecting {0} to {1} failed.".format(src_port, dest_port)
         else:
             print "[jack] Connected {0} to {1}.".format(src_port, dest_port)
-                    
+            
+    def jack_capture (self, filepath):
+        ''' calls jack_capture, returns a process handle and filepath'''
+
+        # TODO: implement configurable format
+        command = ['jack_capture', '-f', 'flac', '-dm', filepath]
+        try:
+            process = sub.Popen(command, stdout=open(os.devnull), stderr=sub.STDOUT, stdin=sub.PIPE)
+        except OSError:
+            print "jack_capture: who someone make error"
+            sys.exit(1)
+        except ValueError:
+            print "Invalid arguments to Popen"
+            sys.exit(1)
+        
+        return process
+
     def record (self, outfile):
         '''main loop'''
+        
+        if self.inputs['alsa'] or self.inputs['pulse'] or self.inputs['jack']:
+            self.command.extend(['-ac', self.achannels])
+            self.command.extend(['-ar', self.arate])
+
+            for plug in self.inputs['alsa']:
+                self.command.extend(['-f', 'alsa','-i', plug])
+            for plug in self.inputs['pulse']:
+                self.command.extend(['-f', 'pulse', '-i', plug])
+            if not self.use_jack_capture and len(self.inputs['jack']) > 0:
+                self.command.extend(['-f', 'jack', '-i', 'ffmpeg'])
+            
+            self.command.extend(['-acodec', self.acodec])
     
-        for plug in self.inputs['alsa']:
-            self.command.extend(['-f', 'alsa','-i', plug])
-        for plug in self.inputs['pulse']:
-            self.command.extend(['-f', 'pulse', '-i', plug])
-        if len(self.inputs['jack']) > 0:
-            self.command.extend(['-f', 'jack', '-i', 'ffmpeg'])
-       
         self.command.extend(['-f', 'x11grab'])
         
         if self.rate < 0:
@@ -71,19 +94,34 @@ class CamCorder ():
 
         self.command.extend(['-r', self.rate])
         self.command.extend(['-s', self.dimensions, '-i', ':0.0+' + self.position])
-        
+       
         self.command.extend(['-vcodec', self.vcodec])
         if self.vpre:
             self.command.extend(['-vpre', self.vpre])
-        if  self.gop > 0:
+        if int(self.gop) > 0:
             self.command.extend(['-g', self.gop])
-        self.command.extend(['-acodec', self.acodec])
-        
+
+        self.command.extend(['-sameq'])
+
         if self.threads:
             self.command.extend(['-threads', self.threads])
         
-        self.command.append(outfile)
-        
+        # Create a tmp file for jack_capture's audio and the recorded video
+        if self.use_jack_capture:
+            try:
+                f, video_tmp = tempfile.mkstemp(suffix=os.path.splitext(outfile)[1], dir=os.getcwd(), prefix='rec')
+                self.command.append(video_tmp)
+                os.close(f)
+
+                f, audio_tmp = tempfile.mkstemp(suffix='.flac', dir=os.getcwd(), prefix='rec')
+                jack_capture = self.jack_capture(audio_tmp)
+                os.close(f)
+                del f
+            except Exception as e:
+                print "Problem making temp files: {0}".format(e)
+        else:
+            self.command.append(outfile)
+
         try:
             self.ffmpeg = sub.Popen(self.command, stdin=None, stderr=sub.PIPE)
         except OSError:
@@ -104,7 +142,7 @@ class CamCorder ():
         jackre = re.compile(r""".+JACK client registered and activated.+""", re.DOTALL)
         
         # Press [q] to stop encoding
-        qencre = re.compile(r""".+Press \[q\] to stop encoding.+""", re.DOTALL)
+        qencre = re.compile(r""".+Press \[q\] to stop.+""", re.DOTALL)
 
         # frame=  337 fps= 29 q=-1.0 size=    1135kB time=11.52 bitrate= 806.9kbits/s
         framere = re.compile(r"""\S+\s+(?P<frame>\d+)           # frame
@@ -132,7 +170,7 @@ class CamCorder ():
                     sys.stderr.write("frame: {0[frame]} fps: {0[fps]} q: {0[q]} size: {0[size]} time: {0[time]} bitrate: {0[bitrate]} to {1}\r".format(m.groupdict(), outfile))
                 # we're probably not recording yet, check for JACK
                 m = jackre.match(chunk)
-                if m:
+                if m and not self.use_jack_capture:
                     for plug in self.inputs['jack']:
                         self.jack_connect(plug, 'ffmpeg:input_1')
                     print ""
@@ -140,14 +178,39 @@ class CamCorder ():
                 # to make output prettier
                 m = qencre.match(chunk)
                 if m:
+                    print "Recording {0} area at position {1}.".format(self.dimensions, self.position)
                     print "Press [q] to stop recording."
                     print ""
 
             time.sleep(.1)
         
-        print ""
         if(self.ffmpeg.returncode == 0):
             print "Recording finished (presumably)."
+            
+            # with jack_capture we need to do a combine the audio stream with the video at the end
+            if self.use_jack_capture:
+                jack_capture.terminate()
+
+                print "Combining jack_capture audio with recorded video to {0}".format(outfile)
+                print "Please wait warmly."
+
+                combine_command = ['ffmpeg', '-y', '-i', audio_tmp, '-i', video_tmp, '-sameq']
+                if self.threads:
+                    combine_command.extend(['-threads', self.threads])
+
+                ret = sub.call(combine_command, stdout=open(os.devnull), stderr=sub.STDOUT)
+                if ret != 0:
+                    print "Fail!"
+                    print "Something went wrong when muxing in the audio!"
+                    print "Your jack_connect audio is here: {0}".format(audio_tmp)
+                    print "Your recorded video is here: {1}".format(video_tmp)
+                else:
+                    print "Done!"
+                    print ""
+
+                    os.remove(audio_tmp)
+                    os.remove(video_tmp)
+                    
             sys.exit(0)
         else:
             print "ffmpeg aborted, run the following for more verbose output:"
@@ -408,7 +471,7 @@ class CameraMan ():
         
         framegroup = optparser.add_argument_group()
         framegroup.add_argument('-r', '--rate', metavar='framerate', default='60', type=str, help="framerate of capture (default: %(default)s)")
-        framegroup.add_argument('-g', '--gop', metavar='gop', default='0', type=str, help="set GOP size (number of smoothing frames, default %(default)s)")
+        framegroup.add_argument('-g', '--gop', metavar='gop', default='-1', type=str, help="set GOP size (number of smoothing frames)")
         
         dimgroup = optparser.add_argument_group(description="These arguments are overriden by -s/--select.")
         dimgroup.add_argument('--width',  metavar='width',  default=str(self.screen.width_in_pixels),  type=str, help="specify recording width (default: screen width)")
@@ -419,9 +482,12 @@ class CameraMan ():
         codecgroup = optparser.add_argument_group()
         codecgroup.add_argument('--vcodec', default='libx264', metavar='codec',  help="force video codec (default: %(default)s)")
         codecgroup.add_argument('--vpre',   default=None,      metavar='preset', help="specify encoder preset (lossless_ultrafast default with libx264)")
-        codecgroup.add_argument('--acodec', default='mp2', metavar='codec', help="force audio codec (default: %(default)s)")
-        
+        codecgroup.add_argument('--acodec', default='mp2', metavar='acodec', help="force audio codec (default: %(default)s)")
+        codecgroup.add_argument('-ar', '--arate', default='48000', metavar='arate', help="force audio rate (default: %(default)s)")
+        codecgroup.add_argument('-ac', '--achannels', default='1', metavar='achannels', help="force audio channels (default: %(default)s)")
+ 
         audiogroup = optparser.add_argument_group()
+        audiogroup.add_argument('--jack-capture', action='store_true', help="use jack_capture to capture jack audio (disables jack inputs)")
         audiogroup.add_argument('--jack',  action='append', dest='jack_inputs',  default=[], metavar='inputs', help="specify inputs from JACK (automatically connected)")
         audiogroup.add_argument('--alsa' , action='append', dest='alsa_inputs',  default=[], metavar='inputs', help="specify inputs from ALSA")
         audiogroup.add_argument('--pulse', action='append', dest='pulse_inputs', default=[], metavar='inputs', help="specify inputs from PulseAudio")
@@ -433,6 +499,7 @@ class CameraMan ():
         args = optparser.parse_args()
         
         camera = CamCorder()
+        camera.use_jack_capture = args.jack_capture
         camera.inputs = {'alsa': args.alsa_inputs, 'jack': args.jack_inputs, 'pulse': args.pulse_inputs}
 
         # in the future these may be a dict of options
@@ -440,8 +507,10 @@ class CameraMan ():
         camera.vpre = args.vpre
         if args.vcodec == 'libx264'  and not args.vpre:
             camera.vpre = 'lossless_ultrafast'
-        
+
         camera.acodec = args.acodec
+        camera.arate = args.arate
+        camera.achannels = args.achannels
         camera.rate = args.rate
         camera.gop = args.gop
 
