@@ -155,7 +155,7 @@ class CamCorder ():
 
         print "{0} Version {1}".format(os.path.basename(__file__), __version__)
         print ""
-        
+
         # grab ffmpeg output
         while(self.ffmpeg.poll() == None):
             readx = select.select([self.ffmpeg.stderr.fileno()], [], [])[0]
@@ -191,13 +191,19 @@ class CamCorder ():
             if self.use_jack_capture:
                 jack_capture.terminate()
 
-                print "Combining jack_capture audio with recorded video to {0}".format(outfile)
+                print ""
+                print "Combining jack_capture audio with recorded video to {0}.".format(outfile)
                 print "Please wait warmly."
 
                 combine_command = ['ffmpeg', '-y', '-i', audio_tmp, '-i', video_tmp, '-sameq']
                 if self.threads:
-                    combine_command.extend(['-threads', self.threads])
+                    if int(self.threads) > 0:
+                        combine_command.extend(['-threads', self.threads])
+                    else:
+                        print "Automatic thread detection is not supported by the copy codec. (sorry!)"
 
+                combine_command.extend([outfile])
+                
                 ret = sub.call(combine_command, stdout=open(os.devnull), stderr=sub.STDOUT)
                 if ret != 0:
                     print "Fail!"
@@ -206,8 +212,7 @@ class CamCorder ():
                     print "Your recorded video is here: {0}".format(video_tmp)
                 else:
                     print "Done!"
-                    print ""
-
+                    
                     os.remove(audio_tmp)
                     os.remove(video_tmp)
                     
@@ -530,7 +535,7 @@ class CameraMan ():
         # overwrite confirmation
         if os.path.isfile(args.outfile):
             ans = raw_input("{0} exists! Overwrite? [y/n]: ".format(args.outfile))
-            if ans != 'y' or ans != 'Y':
+            if ans != 'y' and ans != 'Y':
                 sys.exit(0)
 
         camera.record(args.outfile)
