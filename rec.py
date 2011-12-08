@@ -59,7 +59,7 @@ class CamCorder ():
         ''' calls jack_capture, returns a process handle'''
 
         # TODO: implement configurable format
-        command = ['jack_capture', '-f', 'flac', '-dm', filepath]
+        command = ['jack_capture', '-f', 'flac', '-dm', '--channels', '2', '--port', 'sytem:*', filepath]
         try:
             process = sub.Popen(command, stdout=open(os.devnull), stderr=sub.STDOUT, stdin=sub.PIPE)
         except OSError:
@@ -210,6 +210,8 @@ class CamCorder ():
                     print "Something went wrong when muxing in the audio!"
                     print "Your jack_connect audio is here: {0}".format(audio_tmp)
                     print "Your recorded video is here: {0}".format(video_tmp)
+                    print ""
+                    print "You can run the following for more verbose output: {0}".format(' '.join(combine_command))
                 else:
                     print "Done!"
                     
@@ -489,7 +491,7 @@ class CameraMan ():
         codecgroup.add_argument('--vpre',   default=None,      metavar='preset', help="specify encoder preset (lossless_ultrafast default with libx264)")
         codecgroup.add_argument('--acodec', default='mp2', metavar='acodec', help="force audio codec (default: %(default)s)")
         codecgroup.add_argument('-ar', '--arate', default='48000', metavar='arate', help="force audio rate (default: %(default)s)")
-        codecgroup.add_argument('-ac', '--achannels', default='1', metavar='achannels', help="force audio channels (default: %(default)s)")
+        codecgroup.add_argument('-ac', '--achannels', default='2', metavar='achannels', help="force audio channels (default: %(default)s)")
  
         audiogroup = optparser.add_argument_group()
         audiogroup.add_argument('--jack-capture', action='store_true', help="use jack_capture to capture jack audio (disables jack inputs)")

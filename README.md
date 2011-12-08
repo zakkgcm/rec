@@ -1,7 +1,7 @@
 #_rec_ Lightweight Desktop Recorder
-_rec_ is a lightweight python desktop recorder
-it merely wraps around _ffmpeg_, __jack_capture__, and _jack_connect_ to streamline and simplify recording
-currently there is no GUI interface
+_rec_ is a lightweight python desktop recorder  
+it merely wraps around _ffmpeg_, _jack_capture_, and _jack_connect_ to streamline and simplify recording  
+currently there is no GUI interface  
 
 ## Goals
 * Lightweight
