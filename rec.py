@@ -59,7 +59,7 @@ class CamCorder ():
         ''' calls jack_capture, returns a process handle'''
 
         # TODO: implement configurable format
-        command = ['jack_capture', '-f', 'flac', '-dm', '--channels', '2', '--port', 'sytem:*', filepath]
+        command = ['jack_capture', '-f', 'flac', '-dm', '--port', 'sytem:*', filepath]
         try:
             process = sub.Popen(command, stdout=open(os.devnull), stderr=sub.STDOUT, stdin=sub.PIPE)
         except OSError:
@@ -195,7 +195,9 @@ class CamCorder ():
                 print "Combining jack_capture audio with recorded video to {0}.".format(outfile)
                 print "Please wait warmly."
 
-                combine_command = ['ffmpeg', '-y', '-i', audio_tmp, '-i', video_tmp, '-sameq']
+                # FIXME: more than 2 channels (aka stereo mic + stereo desktop sound) broks mp3
+                # additionally, ffmpeg cannot downmux into 2 channels, we must FORCE flac encoding
+                combine_command = ['ffmpeg', '-y', '-i', audio_tmp, '-i', video_tmp, '-acodec', 'flac', '-sameq']
                 if self.threads:
                     if int(self.threads) > 0:
                         combine_command.extend(['-threads', self.threads])
