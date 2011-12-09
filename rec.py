@@ -59,7 +59,7 @@ class CamCorder ():
         ''' calls jack_capture, returns a process handle'''
 
         # TODO: implement configurable format
-        command = ['jack_capture', '-f', 'flac', '-dm', '--port', 'sytem:*', filepath]
+        command = ['jack_capture', '-f', 'flac', '-dm', '--port', 'system:*', filepath]
         try:
             process = sub.Popen(command, stdout=open(os.devnull), stderr=sub.STDOUT, stdin=sub.PIPE)
         except OSError:
