@@ -198,6 +198,7 @@ class CamCorder ():
                 print "Please wait warmly."
 
 		combine_command = ['mkvmerge']
+                combine_command.extend(['--default-duration', '0:{0}fps'.format(self.rate)]) # mkvmerge defaults to 24fps
 		combine_command.extend(['-o', outfile])
 		combine_command.extend([audio_tmp, video_tmp])
                 
