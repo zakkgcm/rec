@@ -107,9 +107,11 @@ class CamCorder ():
             self.command.extend(['-threads', self.threads])
         
         # Create a tmp file for jack_capture's audio and the recorded video
-        if self.use_jack_capture:
+        # FIXME: somehow inform the user that the output is going to be flac/h264, or allow them to configure it
+	# FIXME: also imply that the output MUST be suffixed .mkv
+	if self.use_jack_capture:
             try:
-                f, video_tmp = tempfile.mkstemp(suffix=os.path.splitext(outfile)[1], dir=os.getcwd(), prefix='rec')
+                f, video_tmp = tempfile.mkstemp(suffix='.h264', dir=os.getcwd(), prefix='rec')
                 self.command.append(video_tmp)
                 os.close(f)
 
@@ -195,18 +197,11 @@ class CamCorder ():
                 print "Combining jack_capture audio with recorded video to {0}.".format(outfile)
                 print "Please wait warmly."
 
-                # FIXME: more than 2 channels (aka stereo mic + stereo desktop sound) broks mp3
-                # additionally, ffmpeg cannot downmux into 2 channels, we must FORCE flac encoding
-                combine_command = ['ffmpeg', '-y', '-i', audio_tmp, '-i', video_tmp, '-acodec', 'flac', '-sameq']
-                if self.threads:
-                    if int(self.threads) > 0:
-                        combine_command.extend(['-threads', self.threads])
-                    else:
-                        print "Automatic thread detection is not supported by the copy codec. (sorry!)"
-
-                combine_command.extend([outfile])
+		combine_command = ['mkvmerge']
+		combine_command.extend(['-o', outfile])
+		combine_command.extend([audio_tmp, video_tmp])
                 
-                ret = sub.call(combine_command, stdout=open(os.devnull), stderr=sub.STDOUT)
+		ret = sub.call(combine_command, stdout=open(os.devnull), stderr=sub.STDOUT)
                 if ret != 0:
                     print "Fail!"
                     print "Something went wrong when muxing in the audio!"
